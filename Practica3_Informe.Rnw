@@ -1,0 +1,551 @@
+\documentclass[11pt,a4paper]{article}
+
+\begin{titlepage}
+\title{\Huge{\textbf{Informe de práctica III \\ Algoritmos Genéticos \\ Selección de genes para clasificación en casos de leucemia aguda}}}
+\author{\Large{Ana Medina García}}
+\date{\today}
+\end{titlepage}
+
+\usepackage[margin=0.8in]{geometry}
+\usepackage[spanish]{babel}
+\usepackage{indentfirst}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\parskip=4mm
+
+\maketitle
+
+\part*{Introducción}
+
+\section*{El problema de la selección de variables}
+Los microarrays de ADN permiten monitorizar y medir los niveles de expresión de decenas de miles de genes simultáneamente en una muestra celular. Esta tecnología hace posible considerar el dignóstico de clasificación de cáncer basado en la expresión génica.
+
+Podemos dividir la clasificación de muestras de cáncer en dos grandes retos: descubrimiento de clases y predicción de clases. El descubrimiento de clases se refiere a definir subtipos de tumor no reconocidos previamente.La predicción se refiere a la asignación, a muestras concretas de tumor, de clases ya definidas que pueden reflejar estados actuales o futuras consecuencias.
+
+Dado el elevado número de genes, para esto es necesario seleccionar una cantidad más limitada o relevante de los mismos. El problema de la selección de características es un problema de optimización en el que debemos:
+\begin{enumerate}
+\item Buscar el espacio de posibles subconjuntos de características. Las estrategias de búsqueda pueden ser: exhaustivas (casi impracticables), heurísticas, o aleatorizadas.
+\item Elegir el subconjunto que óptimo (o casi óptimo) con respecto a una función objetivo. Las estrategias de evaluación pueden ser: métodos ``Filter'' o métodos ``Wrapper''.
+\end{enumerate}
+
+
+\subsection*{Métodos Filter}
+Los métodos de filtrado consiguen la selección de genes independientemente del modelo de clasificación a utilizar. Se basan en un criterio que depende sólo de los datos para definir la importancia o relevancia de cada gen en la clasificación. 
+
+Como la mayoría son univariables, ignoran las correlaciones entre genes y obtienen subconjuntos que pueden contener información redundante.
+
+\subsection*{Métodos Wrapper}
+Los métodos de envoltura seleccionan un subconjunto de genes mediante iteraciones con un clasificador. El objetivo es encontrar el subconjunto que alcanza el mayor rendimiento de predicción para un modelo de aprendizaje concreto.
+Estos métodos son computacionalmente intensivos, ya que se construye un clasificador para cada subconjunto candidato.
+
+\subsubsection*{Algoritmos Genéticos}
+Entre las diferentes opciones, los algoritmos genéticos son probablemente la elección más popularizada. Los métodos empleados para la selección de genes utilizando algoritmos genéticos, comparten un conjunto de características comunes: representan un conjunto de genes preseleccionados con un vector binario, emplean procesos de entrecruzamiento y mutación estándar o específicos, y utilizan un clasificador concreto para la evaluación de la aptitud (función de fitness) de cada conjunto.
+
+En esta práctica, proponemos un sencillo desarrollo, utilizando algoritmos genéticos, para seleccionar subconjuntos de genes para la clasificación de datos de microarrays, más concretamente, para la predicción de clases de cáncer.
+
+\part*{Sistemas y métodos}
+\section*{Conjunto de datos de leucemia}
+
+Consideramos los datos de microarrays de pacientes con Leucemia, utilizados por T. R. Golub \textit{et al.} (1999), para la clasifiación de leucemias agudas. El objetivo es la predición entre dos posibles tipos de leucemia aguda, siendo éstos ALL (leucemia aguda linfoide) y AML (leucemia aguda mieloide).
+
+Nuestro conjunto inicial de datos consiste en 38 muestras (27 de ALL, 11 de AML) obtenidas de pacientes de leucemia aguda en el momento del diagnóstico. Se ha hibridado ARN de células mononucleares de médula ósea con microarrays de alta densidad de oligonucleótidos, producidos por Affymetrix y que contienen pruebas de 7129 genes. En cada una de las muestras, por cada gen, se tiene un nivel cuantitativo de expresión.
+
+Para ello, en primer lugar cargamos los datos de train mencionados, dándoles el formato necesario para su posterior procesamiento, y comprobamos que las muestras se corresponden con las esperadas consultando las dimensiones de la estructura de datos (esperamos 38 muestras - 7129 genes para cada una) y el número de muestras de cada clase:
+
+<<echo=FALSE>>=
+#Directorio de trabajo
+workingDir <- "C:/Users/usuario/Desktop/Curso14-15/Aprendizaje_Computacional/Practica3/ALL-AML_Leukemia/ALL-AML_Leukemia"
+setwd(workingDir)
+#Importamos el fichero de datos para entrenamiento
+leukemia.train <- read.csv("AMLALL_train.data", header=FALSE)
+#Guardamos en un vector la clase (AML o ALL) a la que pertenece cada muestra
+leukemia.classes <- leukemia.train[,7130]
+#Conversión del vector de clase a numérico (ALL=0, AML=1)
+leukemia.classes.binary <- (leukemia.classes =="AML")*1
+#Eliminamos esa última columna de los datos
+leukemia.train <- leukemia.train[,-7130]
+#Leemos el fichero con el nombre de los genes
+gene.names <- read.table("human_genes.txt", header=FALSE)
+#Asignamos los nombres de los genes como nombres de columnas
+colnames(leukemia.train) <- gene.names[,1]
+#Mostramos la clase de la estructura de los datos
+class(leukemia.train)
+#Mostramos las dimensiones del dataframe
+dim(leukemia.train)
+#Comprobamos el número de pacientes de cada tipo
+summary(leukemia.classes)
+@
+
+
+\section*{Pre-procesamiento de datos}
+\subsection*{Normalización}
+
+Una vez tenemos los datos, el primer paso es la normalización y/o escalado de los mismos. En nuestro caso, vamos a aplicar un procedimiento de normalización sencillo de forma que transformamos los datos a una distribución en el intervalo [0,1] según la siguiente fórmula:
+\[ v = x - min(x) / max(x) - min(x) \]
+
+<<echo=FALSE>>=
+#Aplicación de la función de normalización a los datos
+leukemia.train.norm <- sapply(leukemia.train, Normalize <- function(dataSet){
+  datanorm<-( (dataSet-min(dataSet)) / (max(dataSet)-min(dataSet)) )
+})
+#Guardamos la matriz normalizada en formato data frame
+leukemia.train.norm.frame <- data.frame(leukemia.train.norm)
+@
+
+\subsection*{Eliminación de redundancias}
+
+Debemos tener en cuenta que existen muchos conjuntos de genes que están muy relacionados entre sí, de tal forma que el nivel de expresión es casi directamente proporcional entre unos y otros dentro del grupo. Esto puede dar lugar a redundancias en los datos.
+
+Para eliminar los genes que supongan redundancias, buscamos las correlaciones entre los genes y, ordenándolos, eliminaremos los que se tengan un coeficiente de correlación mayor a 0.9 con otro gen que represente mejor el patrón de expresión de ese conjunto. De esta forma, nos quedamos con un subconjunto de 6890 genes.
+
+<<echo=FALSE>>=
+#Eliminación genes muy relacionados entre sí (redundancias)
+load("trainNormFrame.csv")
+@
+
+
+\subsection*{Filtrado por correlación}
+
+Para afrontar el problema, en primer lugar debemos explorar si existen genes cuyo patrón de expresión parece correlacionado con la distinción de clases que se pretende predecir. Con este objetivo, ordenamos los 6890 genes por su grado de correlación.
+
+Según estudios previos sobre los datos, podemos confiar en que existe una correlación elevada de muchos de los genes con la distinción de clases AML-ALL. \textit{``Alrededor de 1100 genes muestran más correlación de lo que se espera por azar''} (Golub \textit{et al.}).
+
+Por lo tanto, para realizar una preselección de los genes con potencial para la predicción de clases, ordenamos todos los genes por su correlación. La ordenación debe realizarse utilizando el valor absoluto de correlación, ya que debe tener la misma relevancia un gen muy sobreexpresado para una clase que uno muy infraexpresado.
+
+
+<<echo=FALSE>>=
+#Cálculo de la correlación con la clase
+correlation <- sapply(leukemia.train.norm.frame, function(i){
+  cor(i,leukemia.classes.binary)
+})
+
+#Número de genes que queremos seleccionar
+gene.number <- 250
+#Ordenación de los genes por correlación (en valor absoluto) y selección de los 200 primeros
+best.correlation <- sort(abs(correlation), decreasing = TRUE)[1:gene.number] 
+
+#Extracción del data frame con sólo los datos de los genes seleccionados
+best.correlation.names <- names(best.correlation)
+leukemia.best.corr <- leukemia.train.norm.frame[,best.correlation.names]
+
+#Añadimos la clase (en formato numérico) al data frame de 200 genes
+leukemia.best.corr$Class <- leukemia.classes.binary
+@
+
+Escogeremos el subconjunto de los \Sexpr{gene.number} primeros genes. Esta cantidad ha sido elegida con el fin de optimizar la ejecución del posterior algoritmo genético.
+
+\section*{Selección de genes mediante Algoritmos Genéticos}
+
+El segundo reto a afrontar del problema, es cómo utilizar un conjunto de muestras conocidas para crear un ``predictor de clases'' capaz de asignar su correspondiente clase a una nueva muestra. Para llevar a cabo esta tarea, se ha desarrollado un modelo aplicando un algoritmo genético con un clasificador sencillo, sobre los \Sexpr{gene.number} genes preseleccionados. 
+
+\subsection*{Definición de la función de fitness}
+
+Con el objetivo de encontrar el subconjunto de genes que obtiene un mayor rendimiento predictivo con el mínimo número de genes seleccionados, se ha implementado una función de fitness que tiene en cuenta estos dos parámetros.
+
+La función utiliza la regresión logística para medir la precisión de predicción de cada subconjunto candidato. El cálculo del valor de fitness persigue maximizar esta capacidad de predicción y minimizar el número de genes necesario para la misma:
+
+<<echo=FALSE>>=
+library(GA)
+library(MASS)
+library(mclust)
+library(caret)
+@
+
+
+<<keep.source=FALSE>>=
+fitness.glm <- function(chromosome) {
+  #creación de la fórmula con los genes a 1 del cromosoma
+  forml <- as.formula(paste("Class~", paste(colnames(leukemia.best.corr[,which(chromosome==1)]), collapse="+"),sep=""))
+  #modelo de regresión logística con los genes escogidos
+  regLog <- glm(forml, data=leukemia.best.corr, family=binomial("logit"))
+  #predición utilizando el modelo
+  pred <- predict(regLog, leukemia.best.corr, type="response")
+  #discretización del vector de predicción obtenido
+  pred.th <- pred
+  pred.th[pred.th<0.5]<-0
+  pred.th[pred.th>=0.5]<-1
+  #matriz de confusión (comparando el vector obtenido con las clases reales)
+  confMatrix <- confusionMatrix(pred.th, leukemia.best.corr$Class)
+  #precisión
+  accuracy <- confMatrix$overall[1]
+  #valor fitness
+  result <- accuracy - sum(chromosome)/gene.number
+  return(result)
+}
+@
+
+
+<<echo=FALSE>>=
+load(file="summaryGA.txt")
+popSize <- sumGA$popSize
+maxIter <- sumGA$maxiter
+pCrossover <- sumGA$pcrossover
+pMutation <- sumGA$pmutation
+fitnessValue <- sumGA$fitness
+@
+
+Una vez definida la función de fitness, ejecutamos el algoritmo genético mediante el siguiente código. Los parámetros del mismo, los cuales han sido seleccionados mediante un prolongado proceso de pruebas, son:
+\begin{itemize}
+\item Tamaño de población: \Sexpr{popSize}
+\item Número de generaciones: \Sexpr{maxIter}
+\item Probabilidad de entrecruzamiento: \Sexpr{pCrossover}
+\item Probabilidad de mutación: \Sexpr{pMutation}
+\end{itemize}
+
+El algoritmo alcanza un valor de fitness de \Sexpr{fitnessValue}. A continuación podemos ver la gráfica de resumen de su evolución:
+
+\includegraphics{GAplot}
+
+Los genes seleccionados por nuestro algoritmo genético son los siquientes:
+<<echo=FALSE,keep.source=FALSE>>=
+options(width=60)
+## Lista de genes seleccionados
+selectedGenes <- colnames(leukemia.best.corr[,which(sumGA$solution[1,]==1)])
+selectedGenes
+@
+
+El número de genes seleccionados es \Sexpr{length(selectedGenes)}. Para visualizar la expresión de los mismos, utilizaremos un mapa de calor, en el cual podemos observar a simple vista si los genes se expresan diferencialmente entre las dos clases de leucemia aguda (en la barra superior: ALL -azul-, AML -naranja). Las columnas representan las 38 muestras y las filas la expresión de los genes escogidos:
+
+
+<<fig=TRUE, echo=FALSE>>=
+options(width=60)
+## Datos de los genes seleccionados
+selectedData <- leukemia.best.corr[,which(sumGA$solution[1,]==1)]
+
+## Visualización la expresión de los genes seleccionados en un heatmap
+library(gplots)
+color.map <- function(class) { if (class=="ALL") "#0000FF" else "#FF8000" }
+classcolors <- unlist(lapply(leukemia.classes, color.map))
+heatmap(t(as.matrix(selectedData)), Colv=NA, col=redgreen(75), ColSideColors=classcolors)
+@
+
+
+Como podemos observar, entre los genes seleccionados encontramos algunos que coinciden con los seleccionados por Golub \textit{et al.} como pueden ser:  \textit{MB-1} (cuya utilidad en la diferenciación de células de linaje linfoide o mieloide ya fue demostrada anteriormente), \textit{Leptin receptor} (se ha demostrado que el receptor de leptina tiene función anti-apoptótica en células hematopoyéticas), \textit{Op18}, \textit{Cyclin D3} y \textit{MCM3} (las tres codifican proteínas críticas para la fase S del ciclo celular),o \textit{E2A} y \textit{HoxA9} (ambos son conocidos oncogenes); así como factores de transcripción.
+
+En cambio, nuestro algoritmo no ha seleccionado varios de los genes nombrados en el artículo como el \textit{Zyxin}, el \textit{CD33} y el \textit{CD11c}, que tienen relación con la adhesión celular. 
+Aunque sí podemos encontrar en la lista otros genes relacionados con la adhesión celular como el \textit{CD83} (un receptor de adhesión de la lectina de tipo I que se  une a monocitos y un subconjunto de células-T CD8+ activadas, (\texttt{http://www.ncbi.nlm.nih.gov/pubmed/11238630}), o el \textit{selectin L} (otro receptor de adhesión, en este caso de lectina tipo C). El producto de este útimo gen se uiliza para la unión y la posterior circulación de los leucocitos en las células endoteliales, lo que facilita su migración hacia los órganos linfoides secundarios y los sitios de inflamación (\texttt{http://www.ncbi.nlm.nih.gov/gene/6402}).
+
+A continuación, podemos observar con más detalle la expresión diferencial de algunos de estos genes:
+
+<<fig=TRUE, echo=FALSE>>=
+#LEPR
+par(mfrow=c(2,2))
+LEPR <- selectedData[,grep("LEPR", names(leukemia.best.corr))]
+stripchart(LEPR ~ leukemia.classes, method="jitter", main = "Leptin receptor expression ALL/AML")
+boxplot(LEPR ~ leukemia.classes)
+hist(LEPR[leukemia.classes=="ALL"], col=rgb(0,0,1,0.5), xlim=c(0,1), main = NULL, xlab = "LEPR Expression")
+hist(LEPR[leukemia.classes=="AML"], col=rgb(1,0,0,0.5), xlim=c(0,1), main = NULL, xlab = "LEPR Expression", add=T)
+plot.new()
+legend('left',c('ALL','AML'), fill = c(rgb(0,0,1,0.5), rgb(1,0,0,0.5)), cex=0.75, pt.cex=0.75, bty = 'o', box.col= "white", border = NA)
+@
+
+El gen recector de leptina, se expresa diferencialmente como cabía esperar, siendo sus niveles de expresión mucho más altos para pacientes con leucemia aguda mieloide. 
+
+En un estudio previo, ya comentado por Golub \textit{et al.} en su artículo, se demostraba que, además de su relación con la regulación del peso, también tiene función antiapoptótica en células hematopyéticas.
+
+La proteína codificada por este gen pertenece a la familia gp130 de receptores de citocinas, que estimulan la transcripción mediante la activación de las proteínas citosólicas STAT. Esta proteína es un receptor de leptina (una hormona que regula el peso) y está involucrado en la regulación del metabolismo, así como en una ruta hematopoyética requerida para la linfopoyesis normal.
+
+Su información en NCBI: \texttt{http://www.ncbi.nlm.nih.gov/gene/3953}
+
+
+<<fig=TRUE, echo=FALSE>>=
+#HoxA9
+par(mfrow=c(2,2))
+HoxA9 <- selectedData[,grep("HoxA9", names(selectedData))]
+stripchart(HoxA9 ~ leukemia.classes, method="jitter", main = "HoxA9 expression ALL/AML")
+boxplot(HoxA9 ~ leukemia.classes)
+hist(HoxA9[leukemia.classes=="ALL"], col=rgb(0,0,1,0.5), xlim=c(0,1), main = NULL, xlab = "HoxA9 Expression")
+hist(HoxA9[leukemia.classes=="AML"], col=rgb(1,0,0,0.5), xlim=c(0,1), main = NULL, xlab = "HoxA9 Expression", add=T)
+plot.new()
+legend('left',c('ALL','AML'), fill = c(rgb(0,0,1,0.5), rgb(1,0,0,0.5)), cex=0.75, pt.cex=0.75, bty = 'o', box.col= "white", border = NA)
+@
+
+Podemos observar como el gen Homeobox A9 se expresa diferencialmente para los dos tipos, apreciando unos niveles más elevados en los casos de leucemia aguda mieloide.
+
+El gen Homeobox A9 codifica un factor de transcripción que regula la expresión génica, la morfogénesis y la diferenciación. Se ha demostrado que una traslocación específica de este gen y el gen NUP98 está relacionada con la leucemogénesis mieloide. 
+
+Debido a que la disfunción de HOXA9 parece relacionada con la leucemia aguda mieloide y que la expresión del gen parece ser marcadamente diferente entre linajes de eritrocitos en distintas etapas de desarrollo, este gen es de particular interés para el estudio de la hematopoyesis.
+
+Su información en NCBI: \texttt{http://www.ncbi.nlm.nih.gov/gene/3205}
+
+<<fig=TRUE, echo=FALSE>>=
+#CCND3
+par(mfrow=c(2,2))
+CCND3 <- selectedData[,grep("CCND3", names(selectedData))]
+stripchart(CCND3 ~ leukemia.classes, method="jitter", main = "Cyclin D3 expression ALL/AML")
+boxplot(CCND3 ~ leukemia.classes)
+hist(CCND3[leukemia.classes=="ALL"], col=rgb(0,0,1,0.5), xlim=c(0,1), main = NULL, xlab = "CCND3 Expression")
+hist(CCND3[leukemia.classes=="AML"], col=rgb(1,0,0,0.5), xlim=c(0,1), main = NULL, xlab = "CCND3 Expression", add=T)
+plot.new()
+legend('left',c('ALL','AML'), fill = c(rgb(0,0,1,0.5), rgb(1,0,0,0.5)), cex=0.75, pt.cex=0.75, bty = 'o', box.col= "white", border = NA)
+@
+
+Podemos observar claramente como el gen Cyclin D3 se encuentra muy infraexpresado en los casos de leucemia aguda mieloide y no tanto así en los casos de linfoide. Por lo tanto, no sorprende que sirva de ayuda en la labor de predicción de clases.
+
+El gen Cyclin D3 codifica una proteína que pertenece a una conservada familia caracterizada por una marcada periodicidad en la abundancia de proteínas a lo lardo del ciclo celular (de ahí su nombre). La proteína forma, como subunidad reguladora, un complejo con CDK4 o CDK6, cuya actividad es requerida para la transición entre las fases G1/S del ciclo celular. Además, esta proteína interacciona y está involucrada en la fosforilación de la proteína Rb de supresión tumoral.
+
+Su información en NCBI: \texttt{http://www.ncbi.nlm.nih.gov/gene/896}
+
+<<fig=TRUE,echo=FALSE>>=
+#MB.1
+par(mfrow=c(2,2))
+MB.1 <- selectedData[,grep("MB.1", names(selectedData))]
+stripchart(MB.1 ~ leukemia.classes, method="jitter", main = "MB-1 gene expression ALL/AML")
+boxplot(MB.1 ~ leukemia.classes)
+hist(MB.1[leukemia.classes=="ALL"], col=rgb(0,0,1,0.5), xlim=c(0,1), main = NULL, xlab = "MB.1 Expression")
+hist(MB.1[leukemia.classes=="AML"], col=rgb(1,0,0,0.5), xlim=c(0,1), main = NULL, xlab = "MB.1 Expression", add=T)
+plot.new()
+legend('left',c('ALL','AML'), fill = c(rgb(0,0,1,0.5), rgb(1,0,0,0.5)), cex=0.75, pt.cex=0.75, bty = 'o', box.col= "white", border = NA)
+@
+
+El gen Mb1 se puede apreciar muy diferencialmente expresado para los dos tipos de leucemia aguda de nuestras muestras, siendo su nivel de espresión casi nulo en los casos de leucemia aguda mieloide.
+
+Este gen codifica la subunidad Ig-alfa de un receptor del antígeno de linfocitos B (\textit{BCR, B-cell antigen receptor}), y  se expresa exclusivamente en una etapa muy temprana de las células-B  de la médula ósea.
+
+En la leucemia linfoide aguda se producen cantidades excesivas de linfocitos inmaduros (linfoblastos). Estos linfocitos inmaduros invaden la sangre, la médula ósea y los tejidos linfáticos, haciendo que se inflamen. Las céululas cancerosas se multiplican rápidamente y desplazan a las células normales de la médula ósea.
+
+La leucemia linfoblástica aguda de precursores B es un tipo de leucemia linfoide aguda que afecta en particular a los precursores de los linfocitos B que están localizados en la médula ósea. Constituyen cerca del 85\% de los casos de leucemias linfoblásticas agudas.
+
+Por todo ello, no es de extrañar que la expresión del gen MB-1 sea mucho más elvada en los casos de leucemia aguda linfoide que en los de mieloide.
+
+
+\section*{Predicción de clases}
+
+\subsection*{Conjunto de datos de test}
+
+Para comprobar si nuestro modelo es capaz de realizar una buena predicción del tipo de leucemia aguda dada una muestra desconocida, utilizaremos los datos de test del conjunto de datos de Golub \textit{et al.}. Se trata de 34 muestras de pacientes con leucemia aguda, 20 de ALL y 14 de AML.
+
+En primer lugar, cargamos los datos y comprobamos que se corresponden con lo esperado. Seguidamente normalizamos la distribución de los datos aplicando la misma fórmula que en los datos de entrenamientoo.
+
+<<echo=FALSE>>=
+#importamos el fichero de datos para el test y guardamos los datos de igual forma que con los de train
+leukemia.test <- read.csv("AMLALL_test.data", header=FALSE)
+leukemia.test.classes <- leukemia.test[,7130]
+leukemia.test <- leukemia.test[,-7130]
+colnames(leukemia.test) <- gene.names[,1]
+#Mostramos la clase de la estructura de los datos
+class(leukemia.test)
+#Mostramos las dimensiones del dataframe
+dim(leukemia.test)
+#Comprobamos el número de pacientes de cada tipo
+summary(leukemia.test.classes)
+#Conversión de la clase a numérico (ALL=0, AML=1)
+leukemia.test.classes.binary <- (leukemia.test.classes =="AML")*1
+#Normalización de los datos de test
+leukemia.test.norm <- sapply(leukemia.test, Normalize <- function(dataSet){
+  datanorm<-( (dataSet-min(dataSet)) / (max(dataSet)-min(dataSet)) )
+})
+#Guardamos la matriz en formato data frame con la clase en numérico
+leukemia.test.norm.frame <- data.frame(leukemia.test, Class=leukemia.test.classes.binary)
+@
+
+\subsection*{Clasifiación mediante regresión logística}
+
+A continuación construimos un modelo de regresión logística con la lista de \Sexpr{length(selectedGenes)} genes seleccionados, lo que llamamos nuestro ``predictor de clases'', y realizamos una predicción de las muestras de test, para comprobar su precisión.
+
+Obtenemos la siguiente matriz de confusión, en la que podemos observar que no hay falsos positivos ni falsos negativos; por lo tanto, tenemos una precisión del 100\%:
+
+<<echo=FALSE>>=
+## Clasificación mediante regresión logistica de los casos del grupo de TEST 
+## utilizando para la predicción los genes seleccionados por el GA
+forml <- as.formula(paste("Class~", paste(selectedGenes, collapse="+"),sep=""))
+regLog <- glm(forml, data=leukemia.test.norm.frame, family=binomial)
+pred <- predict(regLog, leukemia.test.norm.frame, type="response")
+pred.th <- pred
+pred.th[pred.th<0.5]<-0
+pred.th[pred.th>=0.5]<-1
+confMatrix <- confusionMatrix(pred.th,leukemia.test.norm.frame$Class)
+confMatrix$table
+accuracy <- confMatrix$overall[1]
+accuracy
+@
+
+\part*{Resultados}
+
+Golub \textit{et al.} en su artículo exponen la fuerte correlación de muchos de los genes con la distinción de clases ALL/AML, de tal forma que, según ellos, casi cualquier predictor basado en entre 10 y 200 genes obtiene un 100\% de precisión.
+
+Hemos podido comprobar la veracidad de estas afirmaciones, mediante la repetida ejecución de nuestro modelo, el cuál obtiene soluciones muy diferentes en cada ejecución, pero que, al estar seleccionando genes entre los 250 más correlacionados, casi siempre dan lugar a un predictor de precisión 100\%.
+
+Se ha elegido el resultado mostrado anterioremente entre todos los obtenidos, por haber seleccionados muchos de los genes cuya relación con la distinción de clases de leucemia aguda ya está probada, así como otros que tienen funciones que en cierta medida se pueden ver relacionadas con los procesos tumorales a los que nos referimos en este estudio.
+
+Vamos ahora a llevar a cabo otros métodos de selección de variables, con los cuales podemos comparar los resultados obtenidos por nuestro algoritmo genético. Teniendo en cuenta lo expuesto anteriormente sobre la fuerte correlación de los genes con la distinción de clases, es de esperar que la variabilidad de los resultados sea elevada.
+
+\section*{Estimación de la importancia de las variables}
+
+Utilizando el paquete \textit{randomForest}, podemos estimar, mediante un modelo que utiliza el método ``knn'' (K-Nearest Neighbor) controlado por validación cruzada, la importancia de las variables, a modo de ranking, en relación con tipo de leucemia.
+
+A continuación mostramos una gráfica que representa este ranking, mostrando las 40 primeras:
+
+\includegraphics[width=\textwidth]{VarImpPlot3}
+
+Como podemos observar, entre los 40 genes con más importancia según este método, se encuentran algunos de los seleccionados por nuestro algoritmo genético como pueden ser: \texit{LEPR}, \texit{E2A}, \texit{Op18}, \texit{CCND3}. 
+
+Por el contrario, podríamos remarcar que uno de los genes más comentados por Golub \texit{et al.} por su importancia, el \texit{Homeobox A9}, no se encuentra ni entre 50 primeros, y que además, el gen cuya importancia se estima mayor mediante este método y con una cierta diferencia respecto al resto, el \texit{Zyxin}, no ha sido seleccionado en cambio por nuestro algoritmo genético.
+
+
+\section*{Comparación con \texbf{Backwards Feature Selection}}
+
+Vamos a utilizar ahora un algoritmo RFE (Recursive Feature Selection) de la librería \texit{caret} para realizar la selección de variables y poder comparar los resultados obtenidos con los del modelo GA.
+
+El algoritmo utiliza una función de control de validación cruzada (10-folds) para el cálculo de la precisión.
+
+A continuación mostramos la lista de los genes seleccionados:
+
+<<echo=FALSE>>=
+# list the chosen features
+load(file="PredictorsRFE.txt")
+predictors
+@
+
+Como podemos observar, se han seleccionado \Sexpr{length(predictors)} genes, entre los cuales podemos encontrar, de nuevo, algunos que coindicen con los seleccionados por el algoritmo genético como \texit{LEPR}, \texit{E2A}, \texit{CCND3}, y \texit{Op18}. Además nos encontramos tambión con el gen \texit{Zyxin} el cual no se encuentra dentro de nuestra lista de genes del predictor.
+
+Los resultados de este método parecen ser bastante acordes con la estimación de importancia de las variables realizada anteriormente con ``Random Forest''.
+
+A continuación podemos ver la gráfica de la evolución de la precisión en este modelo, con respecto al número de variables seleccionadas, de forma que el valor máximo de precisión se alcanza con \Sexpr{length(predictors)} variables, como ya se ha mencionado anteriormente:
+
+\includegraphics[width=\textwidth]{RFEplot}
+
+\subsection*{Predicción de clases}
+
+Si construimos un modelo de regresión logística utilizando estos \Sexpr{length(predictors)} genes seleccionados mediante RFE, y realizamos una predicción sobre los datos de test obtenemos la siguiente matriz de confusión y el valor de precisión mostrado a continuación:
+
+<<echo=FALSE>>=
+forml <- as.formula(paste("Class~", paste(predictors, collapse="+"),sep=""))
+regLog <- glm(forml, data=leukemia.test.norm.frame, family=binomial)
+pred <- predict(regLog, leukemia.test.norm.frame, type="response")
+pred.th <- pred
+pred.th[pred.th<0.5]<-0
+pred.th[pred.th>=0.5]<-1
+confMatrix <- confusionMatrix(pred.th,leukemia.test.norm.frame$Class)
+confMatrix$table
+accuracy <- confMatrix$overall[1]
+accuracy
+@
+
+
+\section*{Comparación con \texbf{Secuential Forward Selection}}
+
+Para realizar la comparación del modelo GA con la selección secuencial hacia delante vamos a implementar una función SFS que funciona de la siguiente forma:
+
+\begin{enumerate}
+\item La primera variable es seleccionada construyendo un modelo de regresión logística y eligiendo la variable única que mejor predicción realiza.
+\item Utilizando esta primera variable, probamos todos los posibles pares seleccionando una más y elegimos el par que mejor predicción realice utilizando la regresión logística de nuevo.
+\item Utilizando el par ya seleccionado, formamos el trío de mayor precisión añadiendo una variable más, de la misma forma que en el paso anterior.
+\item Este procedimiento continúa hasta que se alcanza la precisión máxima o un número predefinido de variables seleccionadas.
+\end{enumerate}
+
+A continuación mostramos el código de la función:
+
+<<>>=
+sfsFunction <- function(dataSet){
+  
+  genes <- colnames(dataSet)[-251]
+  usedGenes <- vector()
+  best.acc <- 0
+  total.acc <- 0
+  
+  for(i in 1:length(genes)){
+    forml <- as.formula(paste("Class~", genes[i], sep=""))
+    regLog <- glm(forml, data=dataSet, family=binomial("logit"))
+    pred <- predict(regLog, dataSet, type="response")
+    pred.th <- pred
+    pred.th[pred.th<0.5]<-0
+    pred.th[pred.th>=0.5]<-1
+    confMatrix <- confusionMatrix(pred.th, dataSet$Class)
+    accuracy <- confMatrix$overall[1]
+    if(accuracy > best.acc){
+      best.acc <- accuracy
+      best.gene <- genes[i]
+    }
+  }
+  usedGenes <- c(usedGenes, best.gene)
+  genes <- genes[-which(genes==best.gene)]
+  
+  while(length(genes)>0) {
+    best.acc <- 0
+    used <- paste(usedGenes, collapse="+")
+    for(i in 1:length(genes)){
+      forml <- as.formula(paste("Class~", paste(used, genes[i], sep="+"), sep=""))
+      regLog <- glm(forml, data=dataSet, family=binomial("logit"))
+      pred <- predict(regLog, dataSet, type="response")
+      pred.th <- pred
+      pred.th[pred.th<0.5]<-0
+      pred.th[pred.th>=0.5]<-1
+      confMatrix <- confusionMatrix(pred.th, dataSet$Class)
+      accuracy <- confMatrix$overall[1]
+      if(accuracy > best.acc){
+        best.acc <- accuracy
+        best.gene <- genes[i]
+      }
+    }
+    usedGenes <- c(usedGenes, best.gene)
+    genes <- genes[-which(genes==best.gene)]
+    if(best.acc > total.acc){
+      total.acc <- best.acc
+      best.subset <- usedGenes
+    }else{
+      break
+    }
+  }
+  res.list <- list(total.acc = total.acc, best.subset=best.subset)
+  return(res.list) 
+}  
+@
+
+Utilizando esta función, la ejecutamos con los \Sexpr{gene.number} genes y obtenemos la siguiente selección de variables: 
+
+<<echo=FALSE>>=
+sfsSubset <- sfsFunction(leukemia.best.corr)
+sfsSubset
+@
+
+Podemos ver que el número de genes seleccionados por la función SFS es muy bajo, tan solo \Sexpr{length(sfsSubset$best.subset)} genes, ya que alcanza muy pronto una precisión = 1 utilizando el, ya nombrado varias veces, gen \textit{Zyxin} y otro más. 
+
+\subsection*{Predicción de clases}
+
+Intentamos ahora realizar una predicción tan sólo utilizando estos \Sexpr{length(sfsSubset$best.subset)} genes seleccionados, sobre las muestras del conjunto de datos de test. Lo haremos como anteriormente con un modelo de regresión logística, con el cual obtenemos la siguiente matriz de precisión y el consecuente valor de precisión:
+
+<<echo=FALSE>>=
+forml <- as.formula(paste("Class~", paste(sfsSubset$best.subset, collapse="+"),sep=""))
+regLog <- glm(forml, data=leukemia.test.norm.frame, family=binomial)
+pred <- predict(regLog, leukemia.test.norm.frame, type="response")
+pred.th <- pred
+pred.th[pred.th<0.5]<-0
+pred.th[pred.th>=0.5]<-1
+confMatrix <- confusionMatrix(pred.th,leukemia.test.norm.frame$Class)
+confMatrix$table
+accuracy <- confMatrix$overall[1]
+accuracy
+@
+
+
+\part*{Conclusión}
+
+Hemos podido comprobar que los resultados del algoritmo genético son muy variables debido a la fuerte correlación de los genes con la distinción de clases ALL/AML. Al modificar los parámetros del algoritmo podemos variar notablemente los resultados, de tal forma que si elevamos demasiado el número de iteraciones obtenemos normalmente un predictor con muy pocos genes.
+
+Lo que sí es bastante evidente es que podemos conseguir un buen predictor para la distinción de tipos de leucemia aguda, con el que alcanzar muy buenos valores de precisión en la predicción para los datos de test, el problema más complejo es decidir cual sería la mejor opción de entre todas la posibles, y además eficaces, obtenidas.
+
+Una de las cuestiones llamativas es la ausencia del gen \textit{Zyxin} en el predictor creado por nuestro modelo, el cual selecciona \Sexpr{length(selectedGenes)} genes; cuando parece bastante evidente la alta correlación de este gen con las clases ALL/AML según todos los métodos utilizados posteriormente para la comparación de resultados.
+
+A modo de comprobación vamos a observar la expresión diferencial de este gen en concreto:
+
+<<fig=TRUE,echo=FALSE>>=
+#Zyxin
+par(mfrow=c(2,2))
+Zyxin <- selectedData[,grep("Zyxin", names(leukemia.best.corr))]
+stripchart(Zyxin ~ leukemia.classes, method="jitter", main = "Zyxin expression ALL/AML")
+boxplot(Zyxin ~ leukemia.classes)
+hist(Zyxin[leukemia.classes=="ALL"], col=rgb(0,0,1,0.5), xlim=c(0,1), main = NULL, xlab = "Zyxin Expression")
+hist(Zyxin[leukemia.classes=="AML"], col=rgb(1,0,0,0.5), xlim=c(0,1), main = NULL, xlab = "Zyxin Expression", add=T)
+plot.new()
+legend('left',c('ALL','AML'), fill = c(rgb(0,0,1,0.5), rgb(1,0,0,0.5)), cex=0.75, pt.cex=0.75, bty = 'o', box.col= "white", border = NA)
+
+@
+
+Como podemos observar existe también una muy fuerte correlación entre este gen y la clase. Esto podría explicar la obtención de un valor de precisión superior a 0.9 utilizando un predictor que tan sólo contiene este gen y otro más, como es el obtenido mediante la función SFS implementada.
+
+Como última observación, lo que parece bastante evidente es la necesidad de un conjunto de datos bastante mayor, con un número mucho más elevado de muestras sobre todo para el conjunto de test, de tal forma que facilite la selección del mejor predictor de entre todos los posibles, lo cual parece una tarea dificil en este caso.
+
+
+\end{document}
